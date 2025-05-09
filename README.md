@@ -1,2 +1,3 @@
-# qubes-ansible-aux
-Helper modules and roles for qubes-ansible
+# Ansible Collection - bcduggan.qubes_ansible_aux
+
+Documentation for the collection.
