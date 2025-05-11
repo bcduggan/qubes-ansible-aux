@@ -1,6 +1,6 @@
 ---
 namespace: bcduggan
-name: qubes
+name: qubes_ansible_aux
 version: 0.1.0
 description: Helper modules and roles for qubes-ansible
 readme: README.md
