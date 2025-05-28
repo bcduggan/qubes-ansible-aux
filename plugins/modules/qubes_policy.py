@@ -103,11 +103,24 @@ class ToolContext():
     sys.stdout = self.stdout
     if exc_type is SystemExit and exc_value.code == 1:
       raise ToolContextError(self.output.getvalue())
+    elif exc_type is subprocess.CalledProcessError:
+      raise ToolContextError(exc_value.output.decode().rstrip())
     return False
 
 class PolicyUtilError(Exception):
   def __nit__(self, message):
     super().__init__(message)
+
+def client_tool(func, *args, **kwargs):
+  @functools.wraps(func)
+  def wrapper(*args, **kwargs):
+    try:
+      with ToolContext():
+        value = func(*args, **kwargs)
+    except ToolContextError as exc:
+      raise PolicyUtilError(f"Error during client method '{func.__name__}'") from exc
+    return value
+  return wrapper
 
 class PolicyUtil:
   def __init__(self, name: str):
@@ -127,34 +140,35 @@ class PolicyUtil:
     except ToolContextError as exc:
       raise PolicyUtilError("Lint failed") from exc
 
-  def _do(self, method, *args, **kwargs) -> Tuple[str, str] | List[str] | None:
-    method_name = (
-      "policy_include_"+method
+  def _client_method(self, method_name, *args, **kwargs):
+    function_name = (
+      "policy_include_"+method_name
       if self.is_include
-      else "policy_"+method
+      else "policy_"+method_name
     )
-    client_method = getattr(self.client, method_name)
-    try:
-      value = client_method(*args, **kwargs)
-    except subprocess.CalledProcessError as exc:
-      raise PolicyUtilError(f"Error while running method {method}") from exc
-    return value
+    method = getattr(self.client, function_name)
+    return method(*args, **kwargs)
 
+  @client_tool
   def get(self) -> Tuple[str, str]:
-    return self._do("get", self.name)
+    return self._client_method("get", self.name)
 
+  @client_tool
   def remove(self) -> None:
-    self._do("remove", self.name)
-
+    return self._client_method("remove", self.name)
+  
+  @client_tool
   def replace(self, content: str, token: str):
-    self._do("replace", self.name, content, token)
-    
-#   def list(self) -> List[str]:
-#     return self._do("list")
+    return self._client_method("replace", self.name, content, token)
+
+  @client_tool
+  def list(self) -> List[str]:
+    return self._client_method("list")
 
 def policy_util(func, *args, **kwargs):
   @functools.wraps(func)
   def wrapper(*args, **kwargs):
+    self = args[0]
     try:
       value = func(*args, **kwargs)
     except PolicyUtilError as exc:
@@ -163,8 +177,7 @@ def policy_util(func, *args, **kwargs):
       message = ""
     finally:
       if message:
-        # args[0] == self
-        args[0].ansible_module.fail_json(message)
+        self.ansible_module.fail_json(message)
     return value
   return wrapper
 
@@ -258,13 +271,13 @@ class PolicyModule():
   def absent(self):
     if self.ansible_module.check_mode:
       self.ansible_module.exit_json(
-        **self._result(self.name, ""),
+        **self._result(self.policy_util.name, ""),
         state="absent"
       )
     else:
       self._remove()
       self.ansible_module.exit_json(
-        **self._result(self.name, "", changed=True),
+        **self._result(self.policy_util.name, "", changed=True),
         state="absent"
       )
 
