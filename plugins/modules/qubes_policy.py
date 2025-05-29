@@ -252,6 +252,7 @@ class PolicyModule():
       current_content = ""
       token = "new"
 
+    # Will not create an empty policy file
     if self.ansible_module.check_mode or current_content == new_content:
       changed = False
     else:
