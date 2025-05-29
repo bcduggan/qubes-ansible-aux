@@ -81,11 +81,11 @@ state:
 new:
   description: Whether the policy replaced an existing policy
   type: bool
-  returned: When O(state) is "present"
+  returned: When RV(state) is "present"
 content:
   description: Content of the policy
   type: str
-  returned: When O(state) is "present"
+  returned: When RV(state) is "present"
   sample: |
     qubes.SSHAgent * @tag:ssh-agent ssh-agent allow
 '''
