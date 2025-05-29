@@ -212,7 +212,7 @@ class PolicyModule():
   def _replace(self, content, token):
     return self.policy_util.replace(content, token)
 
-  def _result(self, before: str, after: str, changed: bool = False) -> Dict:
+  def _result(self, changed: bool, before: str, after: str) -> Dict:
     common_result = {
       "changed": changed,
       "name": str(self.policy_util.name),
@@ -253,33 +253,29 @@ class PolicyModule():
       token = "new"
 
     if self.ansible_module.check_mode or current_content == new_content:
-      self.ansible_module.exit_json(
-        **self._result(current_content, new_content),
-        state="present",
-        new=(token == "new"),
-        content=new_content
-      )
+      changed = False
     else:
       self._replace(new_content, token)
-      self.ansible_module.exit_json(
-        **self._result(current_content, new_content, changed=True),
-        state="present",
-        new=(token == "new"),
-        content=new_content
-      )
+      changed = True
+
+    self.ansible_module.exit_json(
+      **self._result(changed, current_content, new_content),
+      state="present",
+      new=(token == "new"),
+      content=new_content
+    )
       
   def absent(self):
     if self.ansible_module.check_mode:
-      self.ansible_module.exit_json(
-        **self._result(self.policy_util.name, ""),
-        state="absent"
-      )
+      changed = False
     else:
       self._remove()
-      self.ansible_module.exit_json(
-        **self._result(self.policy_util.name, "", changed=True),
-        state="absent"
-      )
+      changed = True
+
+    self.ansible_module.exit_json(
+      **self._result(changed, self.policy_util.name, "", changed=True),
+      state="absent"
+    )
 
   def run(self):
     if self.ansible_module.params["state"] == "present":
