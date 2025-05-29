@@ -111,10 +111,6 @@ class PolicyModule():
     return self.policy_util.lint(content)
 
   @policy_util
-  def _remove(self):
-    return self.policy_util.remove()
-
-  @policy_util
   def _replace(self, content, token):
     return self.policy_util.replace(content, token)
 
@@ -176,8 +172,12 @@ class PolicyModule():
     if self.ansible_module.check_mode:
       changed = False
     else:
-      self._remove()
-      changed = True
+      try:
+        self.policy_util.remove()
+      except PolicyUtilError:
+        changed = False
+      else:
+        changed = True
 
     self.ansible_module.exit_json(
       **self._result(changed, self.policy_util.name, ""),
