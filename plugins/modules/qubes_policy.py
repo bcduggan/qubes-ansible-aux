@@ -15,22 +15,22 @@ options:
     description: Create, replace, or remove this policy
     required: true
     type: str
-  source:
+  path:
     description:
       - File containing policy content
       - Mutually exclusive with O(content) option
-      - One of O(source) or O(content) required
+      - One of O(path) or O(content) required when O(state) is "present"
     required: false
     type: path
   content:
     description:
       - Policy content
-      - Mutually exclusive with O(source) option
-      - One of O(source) or O(content) required
+      - Mutually exclusive with O(path) option
+      - One of O(path) or O(content) required when O(state) is "present"
     required: false
     type: str
   state:
-    description: 
+    description: Intended state of the policy
     required: false
     choices:
       - present
@@ -45,12 +45,17 @@ EXAMPLES = '''
 - name: Write policy
   qubes_policy:
     name: 30-mgmtvm
-    source: policy/30-mgmtvm
+    path: policy/30-mgmtvm
 
 - name: Write include policy
   qubes_policy:
     name: include/admin-global-ro
-    source: policy/include/admin-global-ro
+    path: policy/include/admin-global-ro
+
+- name: Write templated policy
+  qubes_policy:
+    name: 30-split-ssh
+    content: "{{ lookup('ansible.builtin.template', './templates/policy/30-split-ssh.j2') }}"
 
 - name: Remove policy
   qubes_policy:
@@ -59,11 +64,30 @@ EXAMPLES = '''
 '''
 
 RETURN = '''
-# check_updates_vm:
-#   description: Check for updates inside qubes
-#   type: bool
-#   returned: If defined, and if `defaults` is `false` or has default value
-#   sample: true
+name:
+  description: The validated policy name
+  type: str
+  returned: always
+  sample: 30-split-ssh
+is_include:
+  description: Whether the policy is an include policy
+  type: bool
+  returned: always
+state:
+  description: Effective state of the policy
+  type: str
+  returned: always
+  sample: present
+new:
+  description: Whether the policy replaced an existing policy
+  type: bool
+  returned: When O(state) is "present"
+content:
+  description: Content of the policy
+  type: str
+  returned: When O(state) is "present"
+  sample: |
+    qubes.SSHAgent * @tag:ssh-agent ssh-agent allow
 '''
 
 import functools
@@ -92,12 +116,12 @@ class PolicyModule():
     self.ansible_module = AnsibleModule(
       argument_spec=dict(
         name=dict(type="str", required=True),
-        source=dict(type="path", required=False),
+        path=dict(type="path", required=False),
         content=dict(type="str", required=False),
         state=dict(type="str", required=False, default="present")
       ),
-      mutually_exclusive=([["source", "content"]]),
-      # required_one_of=([["source", "content"]]),
+      required_if=[('state', 'present', ('path', 'content'), True)],
+      mutually_exclusive=[("path", "content")],
       supports_check_mode=True
     )
     self.policy_util = self._PolicyUtil(self.ansible_module.params["name"])
@@ -118,7 +142,8 @@ class PolicyModule():
     common_result = {
       "changed": changed,
       "name": str(self.policy_util.name),
-      "is_include": self.policy_util.is_include
+      "is_include": self.policy_util.is_include,
+      "state": self.ansible_module.params["state"]
     }
     diff_result = {
       **common_result,
@@ -133,14 +158,14 @@ class PolicyModule():
       else common_result
     )
 
-  def _source_content(self) -> str:
-    with open(self.ansible_module.params["source"], "r", encoding="utf-8") as source:
-      return source.read()
+  def _path_content(self) -> str:
+    with open(self.ansible_module.params["path"], "r", encoding="utf-8") as path:
+      return path.read()
 
   def present(self):
     new_content = (
-      self._source_content()
-      if self.ansible_module.params["source"]
+      self._path_content()
+      if self.ansible_module.params["path"]
       else self.ansible_module.params["content"]
     )
 
@@ -149,8 +174,6 @@ class PolicyModule():
     try:
       current_content, token = self.policy_util.get()
     except PolicyUtilError:
-      # No test for how RPC execution failed:
-      # qrexec.tools.qubes_policy_editor:manage_policy
       current_content = ""
       token = "new"
 
@@ -163,11 +186,10 @@ class PolicyModule():
 
     self.ansible_module.exit_json(
       **self._result(changed, current_content, new_content),
-      state="present",
       new=(token == "new"),
       content=new_content
     )
-      
+
   def absent(self):
     if self.ansible_module.check_mode:
       changed = False
@@ -181,7 +203,6 @@ class PolicyModule():
 
     self.ansible_module.exit_json(
       **self._result(changed, self.policy_util.name, ""),
-      state="absent"
     )
 
   def run(self):
@@ -191,8 +212,7 @@ class PolicyModule():
       self.absent()
   
 def main():
-  policy_module = PolicyModule()
-  policy_module.run()
+  PolicyModule().run()
 
 if __name__ == "__main__":
   main()
