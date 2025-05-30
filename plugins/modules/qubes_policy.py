@@ -90,8 +90,8 @@ content:
     qubes.SSHAgent * @tag:ssh-agent ssh-agent allow
 '''
 
+import os
 import functools
-from typing import Tuple, List, Dict
 from ansible.module_utils.basic import AnsibleModule
 from ansible_collections.bcduggan.qubes_ansible_aux.plugins.module_utils.policy_util import PolicyUtil, PolicyUtilError
 
@@ -138,31 +138,86 @@ class PolicyModule():
   def _replace(self, content, token):
     return self.policy_util.replace(content, token)
 
-  def _result(self, changed: bool, before: str, after: str) -> Dict:
-    common_result = {
+  def _result(self, changed: bool) -> dict[str, bool | str]:
+    return {
       "changed": changed,
-      "name": str(self.policy_util.name),
+      "name": self.policy_util.name,
       "is_include": self.policy_util.is_include,
       "state": self.ansible_module.params["state"]
     }
-    diff_result = {
-      **common_result,
-      "diff": {
-        "before": before,
-        "after": after
-      }
+
+  def _diff_result(self, header_tag: str, before: str, after: str) -> dict[str, str]:
+    return {
+      "before": before,
+      "before_header": f"{self.policy_util.name} ({header_tag})",
+      "after": after,
+      "after_header": f"{self.policy_util.name} ({header_tag})"
     }
+
+  def _state_diff_result(self, before: str, after: str) -> dict[str, str]:
+    return self._diff_result("state", before, after)
+
+  def _absent_result(self, changed: bool, before_state: str) -> dict[str, bool | str | list[dict[str, str]]]:
+    anti_state = (
+      "present"
+      if before_state == "absent"
+      else "absent"
+    )
+
+    after_state = (
+      anti_state
+      if changed
+      else before_state
+    ) + os.linesep
+
     return (
-      diff_result
+      {
+        **self._result(changed),
+        "diff": [self._state_diff_result(before_state + os.linesep, after_state)]
+      }
       if self.ansible_module._diff
-      else common_result
+      else self._result(changed)
+    )
+    
+  def _present_result(
+    self, changed: bool, token: str, before_content: str, after_content: str
+  ) -> dict[str, bool | str | list[dict[str, str]]]:
+
+    before_state = (
+      "absent"
+      if token == "new"
+      else "present"
+    ) + os.linesep
+
+    after_state = (
+      "present"
+      if changed
+      else before_state
+    ) + os.linesep
+
+    present_result = {
+      **self._result(changed),
+      "new": (token == "new"),
+      "content": after_content
+    }
+
+    return (
+      {
+        **present_result,
+        "diff": [
+          self._state_diff_result(before_state, after_state),
+          self._diff_result("content", before_content, after_content)
+        ]
+      }
+      if self.ansible_module._diff
+      else present_result
     )
 
   def _path_content(self) -> str:
     with open(self.ansible_module.params["path"], "r", encoding="utf-8") as path:
       return path.read()
 
-  def present(self):
+  def present(self) -> None:
     new_content = (
       self._path_content()
       if self.ansible_module.params["path"]
@@ -185,12 +240,18 @@ class PolicyModule():
       changed = True
 
     self.ansible_module.exit_json(
-      **self._result(changed, current_content, new_content),
-      new=(token == "new"),
-      content=new_content
+      **self._present_result(changed, token, current_content, new_content),
     )
 
   def absent(self):
+    policies = self.policy_util.list()
+    current_state = (
+      "present"
+      if self.policy_util.name in policies
+      else "absent"
+    )
+    print(policies)
+
     if self.ansible_module.check_mode:
       changed = False
     else:
@@ -202,7 +263,7 @@ class PolicyModule():
         changed = True
 
     self.ansible_module.exit_json(
-      **self._result(changed, self.policy_util.name, ""),
+      **self._absent_result(changed, current_state),
     )
 
   def run(self):

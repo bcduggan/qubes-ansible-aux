@@ -1,6 +1,5 @@
-import pathlib
 import functools
-from typing import Tuple, List, Dict
+from pathlib import PurePosixPath
 from qrexec.policy.admin_client import PolicyClient
 import qrexec.tools.qubes_policy_lint as linter
 import qrexec.tools.qubes_policy_editor as editor
@@ -25,11 +24,10 @@ class PolicyUtil:
   def __init__(self, name: str):
     try:
       with ToolContext():
-        valid_name = editor.validate_name(name)
+        self.name = editor.validate_name(name)
     except ToolContextError as exc:
       raise PolicyUtilError("Name validation failed") from exc
-    self.name = pathlib.PurePosixPath(valid_name)
-    self.is_include = self.name.parent == "include"
+    self.is_include = PurePosixPath(self.name).parent == "include"
     self.client = PolicyClient()
 
   def lint(self, content: str) -> None:
@@ -49,7 +47,7 @@ class PolicyUtil:
     return method(*args, **kwargs)
 
   @client_tool
-  def get(self) -> Tuple[str, str]:
+  def get(self) -> tuple[str, str]:
     return self._client_method("get", self.name)
 
   @client_tool
@@ -57,10 +55,10 @@ class PolicyUtil:
     return self._client_method("remove", self.name)
   
   @client_tool
-  def replace(self, content: str, token: str):
+  def replace(self, content: str, token: str) -> None:
     return self._client_method("replace", self.name, content, token)
 
   @client_tool
-  def list(self) -> List[str]:
+  def list(self) -> list[str]:
     return self._client_method("list")
 
