@@ -92,10 +92,17 @@ content:
 
 import os
 import functools
+from collections.abc import Callable
 from ansible.module_utils.basic import AnsibleModule
 from ansible_collections.bcduggan.qubes_ansible_aux.plugins.module_utils.policy_util import PolicyUtil, PolicyUtilError
 
-def policy_util(func, *args, **kwargs):
+type DiffResultValue = dict[str, str]
+type DiffResultValues = list[DiffResult]
+type ResultValue = bool | str
+type Result = dict[str, ResultValue]
+type DiffResult = dict[str, ResultValue | DiffResultValue | DiffResultValues]
+
+def policy_util(func, *args, **kwargs) -> Callable:
   @functools.wraps(func)
   def wrapper(*args, **kwargs):
     self = args[0]
@@ -127,18 +134,18 @@ class PolicyModule():
     self.policy_util = self._PolicyUtil(self.ansible_module.params["name"])
 
   @policy_util
-  def _PolicyUtil(self, name):
+  def _PolicyUtil(self, name:str) -> PolicyUtil:
     return PolicyUtil(name)
 
   @policy_util
-  def _lint(self, content):
+  def _lint(self, content: str) -> None:
     return self.policy_util.lint(content)
 
   @policy_util
-  def _replace(self, content, token):
+  def _replace(self, content: str, token: str) -> None:
     return self.policy_util.replace(content, token)
 
-  def _result(self, changed: bool) -> dict[str, bool | str]:
+  def _result(self, changed: bool) -> Result:
     return {
       "changed": changed,
       "name": self.policy_util.name,
@@ -146,7 +153,7 @@ class PolicyModule():
       "state": self.ansible_module.params["state"]
     }
 
-  def _diff_result(self, header_tag: str, before: str, after: str) -> dict[str, str]:
+  def _diff_result(self, header_tag: str, before: str, after: str) -> DiffResultValue:
     return {
       "before": before,
       "before_header": f"{self.policy_util.name} ({header_tag})",
@@ -154,10 +161,7 @@ class PolicyModule():
       "after_header": f"{self.policy_util.name} ({header_tag})"
     }
 
-  def _state_diff_result(self, before: str, after: str) -> dict[str, str]:
-    return self._diff_result("state", before, after)
-
-  def _absent_result(self, changed: bool, before_state: str) -> dict[str, bool | str | list[dict[str, str]]]:
+  def _absent_result(self, changed: bool, before_state: str) -> Result | DiffResult:
     anti_state = (
       "present"
       if before_state == "absent"
@@ -173,7 +177,7 @@ class PolicyModule():
     return (
       {
         **self._result(changed),
-        "diff": [self._state_diff_result(before_state + os.linesep, after_state)]
+        "diff": self._diff_result("state", before_state + os.linesep, after_state)
       }
       if self.ansible_module._diff
       else self._result(changed)
@@ -181,7 +185,7 @@ class PolicyModule():
     
   def _present_result(
     self, changed: bool, token: str, before_content: str, after_content: str
-  ) -> dict[str, bool | str | list[dict[str, str]]]:
+  ) -> Result | DiffResult:
 
     before_state = (
       "absent"
@@ -205,7 +209,7 @@ class PolicyModule():
       {
         **present_result,
         "diff": [
-          self._state_diff_result(before_state, after_state),
+          self._diff_result("state", before_state, after_state),
           self._diff_result("content", before_content, after_content)
         ]
       }
@@ -213,13 +217,13 @@ class PolicyModule():
       else present_result
     )
 
-  def _path_content(self) -> str:
-    with open(self.ansible_module.params["path"], "r", encoding="utf-8") as path:
-      return path.read()
-
   def present(self) -> None:
+    def read_file(path) -> str:
+      with open(path, "r", encoding="utf-8") as file:
+        return file.read()
+
     new_content = (
-      self._path_content()
+      read_file(self.ansible_module.params["path"])
       if self.ansible_module.params["path"]
       else self.ansible_module.params["content"]
     )
@@ -243,14 +247,14 @@ class PolicyModule():
       **self._present_result(changed, token, current_content, new_content),
     )
 
-  def absent(self):
+  def absent(self) -> None:
     policies = self.policy_util.list()
+
     current_state = (
       "present"
       if self.policy_util.name in policies
       else "absent"
     )
-    print(policies)
 
     if self.ansible_module.check_mode:
       changed = False
@@ -266,14 +270,11 @@ class PolicyModule():
       **self._absent_result(changed, current_state),
     )
 
-  def run(self):
+  def run(self) -> None:
     if self.ansible_module.params["state"] == "present":
       self.present()
     elif self.ansible_module.params["state"] == "absent":
       self.absent()
   
-def main():
-  PolicyModule().run()
-
 if __name__ == "__main__":
-  main()
+  PolicyModule().run()
